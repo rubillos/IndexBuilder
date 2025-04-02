@@ -68,6 +68,26 @@ strings_to_remove_parts = [
 
 stringsToRemove = r'|'.join(strings_to_remove_parts)
 
+theme = Theme({
+			"progress.percentage": "white",
+			"progress.remaining": "green",
+			"progress.elapsed": "cyan",
+			"bar.complete": "green",
+			"bar.finished": "green",
+			"bar.pulse": "green",
+			"repr.ellipsis": "white",
+			"repr.number": "white",
+			"repr.path": "white",
+			"repr.filename": "white"
+			})
+
+progressDesc = "[progress.description]{task.description}"
+progressPercent = "[progress.percentage]{task.percentage:>3.0f}% "
+progressPercentCount = "[progress.percentage]{task.percentage:>3.0f}% ({task.fields[count]})"
+progressPercentMedia = "[progress.percentage]{task.percentage:>3.0f}% (copied:{task.fields[count]}, reused:{task.fields[reuse]})"
+
+console = Console(theme=theme)
+
 def extract_visible_text_from_html(file_path):
 	"""
 	Extracts user-visible text and the page name from an HTML file at the specified path.
@@ -119,7 +139,7 @@ def extract_visible_text_from_html(file_path):
 		print(f"Error extracting text from {file_path}: {e}")
 		return "Error", ""
 
-def scan_folder_for_index_files(start_folder):
+def scan_folder_for_index_files(start_folder, date_string):
 	"""
 	Recursively scans a folder for files named 'index*.html', extracts their page name and text,
 	and returns an array of tuples containing the relative file path, page name, and page text.
@@ -144,6 +164,8 @@ def scan_folder_for_index_files(start_folder):
 					relative_path = os.path.relpath(full_path, srcFolder)
 					page_name, page_text = extract_visible_text_from_html(full_path)
 					
+					if date_string:
+						page_name = f"{page_name} <i>({date_string})</i>"
 					if page_text != "":
 						result.append((relative_path, page_name, page_text))
 	except Exception as e:
@@ -168,27 +190,42 @@ def read_links_file(file_path):
 	except Exception as e:
 		print(f"Error reading file {file_path}: {e}")
 		return []
-	
+
 def find_index_files():
 	link_list = read_links_file(os.path.join(srcFolder, "links.txt"))
 	index_data = []
-	for link in link_list:
-		link_parts = link.split("\t")
-		if len(link_parts) >= 6:
-			relative_path = link_parts[5]
-			if not "http" in relative_path:
-				if not "/" in relative_path:
-					if "L" in link_parts[3]:
-						relative_path = "Local/" + relative_path
-					else:
-						relative_path = "travel/" + relative_path
-				if ".htm" in relative_path:
-					relative_path = os.path.dirname(relative_path)
+	with Progress(progressDesc, BarColumn(), progressPercent, console=console) as progress:
+		task = progress.add_task("Build site index...", total=len(link_list))
+		for link in link_list:
+			link_parts = link.split("\t")
+			if len(link_parts) >= 6:
+				relative_path = link_parts[5]
+				if not "http" in relative_path:
+					if not "/" in relative_path:
+						if "L" in link_parts[3]:
+							relative_path = "Local/" + relative_path
+						else:
+							relative_path = "travel/" + relative_path
+					if ".htm" in relative_path:
+						relative_path = os.path.dirname(relative_path)
 
-				search_path = os.path.join(srcFolder, relative_path)
-				if os.path.exists(search_path):
-					link_data = scan_folder_for_index_files(search_path)
-					index_data.extend(link_data)
+					year = link_parts[0].strip()
+					month = link_parts[1].strip()
+					day = link_parts[2].strip().zfill(2)
+
+					if month.isdigit():
+						month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][int(month) - 1]
+
+					if year and month:
+						date_string = f"{year}-{month}-{day}" if day else f"{year}-{month}"
+					else:
+						date_string = ""
+
+					search_path = os.path.join(srcFolder, relative_path)
+					if os.path.exists(search_path):
+						link_data = scan_folder_for_index_files(search_path, date_string)
+						index_data.extend(link_data)
+			progress.update(task, advance=1)
 	return index_data
 
 if __name__ == "__main__":
